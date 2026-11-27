@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nyamira Town Vehicle Entry, Exit & Route Intelligence</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="status-pulse"></div>
+      <div>
+        <h1>Nyamira Town Vehicle Intelligence</h1>
+        <p class="subtitle">Gate Entry/Exit Telemetry, Dwell Analytics &amp; Corridor Routing • Nyamira County</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button id="btn-open-modal" class="btn btn-primary">+ Log / ANPR Scan</button>
+      <button id="btn-simulate" class="btn btn-secondary">Simulate Gate Burst</button>
+      <button id="btn-auto-refresh" class="btn btn-ghost active">Auto-Sync: ON</button>
+    </div>
+  </header>
+
+  <!-- KPI Summary Row -->
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <span class="kpi-label">Entries Today</span>
+      <strong id="kpi-entries" class="kpi-value accent-green">0</strong>
+      <span class="kpi-hint">Inbound gate captures</span>
+    </article>
+    <article class="kpi-card">
+      <span class="kpi-label">Exits Today</span>
+      <strong id="kpi-exits" class="kpi-value accent-blue">0</strong>
+      <span class="kpi-hint">Outbound gate departures</span>
+    </article>
+    <article class="kpi-card">
+      <span class="kpi-label">Currently Inside Town</span>
+      <strong id="kpi-inside" class="kpi-value accent-amber">0</strong>
+      <span class="kpi-hint">Active unpaired entries</span>
+    </article>
+    <article class="kpi-card">
+      <span class="kpi-label">Avg. Town Dwell Time</span>
+      <strong id="kpi-dwell" class="kpi-value">0m</strong>
+      <span class="kpi-hint">Paired ENTRY → EXIT duration</span>
+    </article>
+    <article class="kpi-card">
+      <span class="kpi-label">Anomaly &amp; Overstay Alerts</span>
+      <strong id="kpi-alerts" class="kpi-value accent-red">0</strong>
+      <span class="kpi-hint">Late-night, repeat or overstay</span>
+    </article>
+  </section>
+
+  <!-- Main Workspace -->
+  <main class="workspace-grid">
+    <!-- Left: Interactive Leaflet Map & Corridor Breakdown -->
+    <section class="panel map-section">
+      <div class="panel-header">
+        <div>
+          <h2>Nyamira Geospatial Corridor Map</h2>
+          <span class="panel-meta">OpenStreetMap • Kisii, Sotik, Kebirigo–Ikonge &amp; Town Center</span>
+        </div>
+        <div class="legend-inline">
+          <span class="dot dot-gate"></span> Checkpoint
+          <span class="dot dot-in"></span> Entry / Inside
+          <span class="dot dot-out"></span> Exit
+        </div>
+      </div>
+
+      <div id="nyamira-map" class="map-container"></div>
+
+      <div class="corridor-summary">
+        <h3>Corridor Volume Breakdown</h3>
+        <div id="corridor-bars" class="corridor-bars"></div>
+      </div>
+    </section>
+
+    <!-- Right: Anomaly Triage & Active Town Vehicles -->
+    <aside class="panel side-section">
+      <div class="sub-block">
+        <div class="panel-header">
+          <h2>Anomaly &amp; Triage Feed</h2>
+          <span id="alert-badge-count" class="pill pill-danger">0 Alerts</span>
+        </div>
+        <div id="alert-feed" class="alert-feed"></div>
+      </div>
+
+      <div class="sub-block mt-lg">
+        <div class="panel-header">
+          <h2>Vehicles Currently Inside Town</h2>
+          <span id="active-count-pill" class="pill pill-warning">0 Active</span>
+        </div>
+        <div id="active-vehicles-list" class="active-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Bottom Full-Width Filterable Movement Log -->
+  <section class="panel log-section">
+    <div class="panel-header log-header">
+      <div>
+        <h2>Live Vehicle Movement &amp; Dwell Log</h2>
+        <span class="panel-meta">Automatic ENTRY → EXIT pairing and Kenyan plate verification</span>
+      </div>
+
+      <div class="filters-row">
+        <input
+          type="text"
+          id="filter-plate"
+          class="input-control"
+          placeholder="Search plate (e.g. KDA 214M)..."
+        />
+        <select id="filter-corridor" class="input-control">
+          <option value="">All Corridors</option>
+          <option value="Kisii–Nyamira Road">Kisii–Nyamira Road</option>
+          <option value="Sotik–Nyamira Road">Sotik–Nyamira Road</option>
+          <option value="Kebirigo–Ikonge Road">Kebirigo–Ikonge Road</option>
+          <option value="Nyamira Town Center / Hospital Junction">Nyamira Town Center / Hospital Junction</option>
+        </select>
+        <select id="filter-direction" class="input-control">
+          <option value="">All Directions</option>
+          <option value="ENTRY">ENTRY (IN)</option>
+          <option value="EXIT">EXIT (OUT)</option>
+        </select>
+        <select id="filter-category" class="input-control">
+          <option value="">All Categories</option>
+          <option value="Matatu/PSV">Matatu/PSV</option>
+          <option value="Cargo/Agro-Freight">Cargo/Agro-Freight</option>
+          <option value="Private">Private</option>
+          <option value="Delivery Van">Delivery Van</option>
+          <option value="Government">Government</option>
+        </select>
+        <button id="btn-reset-filters" class="btn btn-ghost">Reset</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Plate No.</th>
+            <th>Direction</th>
+            <th>Corridor / Gate</th>
+            <th>Category &amp; Purpose</th>
+            <th>Timestamp</th>
+            <th>Dwell Time</th>
+            <th>Source</th>
+            <th>Status / Flag</th>
+          </tr>
+        </thead>
+        <tbody id="movements-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Manual / ANPR Quick-Log Modal -->
+  <div id="log-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-title">Log Gate Event (Manual / ANPR Scan)</h2>
+        <button id="btn-close-modal" class="icon-btn" aria-label="Close modal">&times;</button>
+      </div>
+
+      <form id="movement-form" class="form-grid">
+        <div class="form-group">
+          <label for="input-plate">Kenyan Registration Number</label>
+          <div class="inline-field">
+            <input
+              type="text"
+              id="input-plate"
+              class="input-control"
+              placeholder="e.g. KDA 123A or GK 405B"
+              required
+            />
+            <button type="button" id="btn-anpr-scan" class="btn btn-secondary">Auto-Scan ANPR</button>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="input-direction">Direction</label>
+            <select id="input-direction" class="input-control" required>
+              <option value="ENTRY">ENTRY (Entering Nyamira)</option>
+              <option value="EXIT">EXIT (Exiting Nyamira)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="input-category">Vehicle Category</label>
+            <select id="input-category" class="input-control" required>
+              <option value="Matatu/PSV">Matatu/PSV</option>
+              <option value="Cargo/Agro-Freight">Cargo/Agro-Freight</option>
+              <option value="Private">Private</option>
+              <option value="Delivery Van">Delivery Van</option>
+              <option value="Government">Government</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="input-corridor">Entry / Exit Corridor</label>
+          <select id="input-corridor" class="input-control" required>
+            <option value="Kisii–Nyamira Road">Kisii–Nyamira Road</option>
+            <option value="Sotik–Nyamira Road">Sotik–Nyamira Road</option>
+            <option value="Kebirigo–Ikonge Road">Kebirigo–Ikonge Road</option>
+            <option value="Nyamira Town Center / Hospital Junction">Nyamira Town Center / Hospital Junction</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="input-purpose">Trip Purpose</label>
+          <input
+            type="text"
+            id="input-purpose"
+            class="input-control"
+            value="Commercial & Town Transit"
+            required
+          />
+        </div>
+
+        <p id="form-error" class="form-error hidden"></p>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-cancel-modal" class="btn btn-ghost">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit Gate Event</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="app.js"></script>
+</body>
+</html>
